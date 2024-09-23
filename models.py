@@ -2,6 +2,9 @@
 
 from sentiment_data import *
 from utils import *
+import numpy as np
+import math
+import random
 
 from collections import Counter
 
@@ -31,7 +34,29 @@ class UnigramFeatureExtractor(FeatureExtractor):
     and any additional preprocessing you want to do.
     """
     def __init__(self, indexer: Indexer):
-        raise Exception("Must be implemented")
+        self.indexer = indexer
+
+    def get_indexer(self):
+        return self.indexer
+
+    def extract_features(self, sentence: List[str], add_to_indexer: bool=False) -> Counter:
+        features = Counter()
+        # lower case and remove punctuation
+        sentence = [word.lower() for word in sentence if word.isalnum()]
+
+        #
+        for word in sentence:
+            # Decide whether to use counts or binary presence
+            # Here, we'll use binary features (0/1 for absence/presence)
+            if add_to_indexer:
+                idx = self.indexer.add_and_get_index(word)
+            else:
+                idx = self.indexer.index_of(word)
+            if idx != -1:
+                features[idx] = 1  # Set to 1 for presence
+        return features
+
+
 
 
 class BigramFeatureExtractor(FeatureExtractor):
@@ -39,7 +64,29 @@ class BigramFeatureExtractor(FeatureExtractor):
     Bigram feature extractor analogous to the unigram one.
     """
     def __init__(self, indexer: Indexer):
-        raise Exception("Must be implemented")
+        self.indexer = indexer
+
+    def get_indexer(self):
+        return self.indexer
+
+    def extract_features(self, sentence: List[str], add_to_indexer: bool=False) -> Counter:
+
+        features = Counter()
+        # lower case and remove punctuation
+        sentence = [word.lower() for word in sentence if word.isalnum()]
+        # remove stopwords
+        from nltk.corpus import stopwords
+        stop_words = set(stopwords.words('english'))
+        sentence = [word for word in sentence if word not in stop_words]
+        for i in range(len(sentence) - 1):
+            bigram = sentence[i] + ' ' + sentence[i + 1]
+            if add_to_indexer:
+                idx = self.indexer.add_and_get_index(bigram)
+            else:
+                idx = self.indexer.index_of(bigram)
+            if idx != -1:
+                features[idx] += 1
+        return features
 
 
 class BetterFeatureExtractor(FeatureExtractor):
@@ -47,7 +94,50 @@ class BetterFeatureExtractor(FeatureExtractor):
     Better feature extractor...try whatever you can think of!
     """
     def __init__(self, indexer: Indexer):
-        raise Exception("Must be implemented")
+        self.indexer = indexer
+
+    def get_indexer(self):
+        return self.indexer
+
+    def extract_features(self, sentence: List[str], add_to_indexer: bool=False) -> Counter:
+        features = Counter()
+        # lower case and remove punctuation
+        sentence = [word.lower() for word in sentence if word.isalnum()]
+        # remove stopwords
+        from nltk.corpus import stopwords
+        stop_words = set(stopwords.words('english'))
+        sentence = [word for word in sentence if word not in stop_words]
+        # Unigram features
+        for word in sentence:
+            if add_to_indexer:
+                idx = self.indexer.add_and_get_index(word)
+            else:
+                idx = self.indexer.index_of(word)
+            if idx != -1:
+                features[idx] += 1
+            # character tr-gram features
+            for i in range(len(word) - 2):
+                trigram = word[i:i+3]
+                if add_to_indexer:
+                    idx = self.indexer.add_and_get_index(trigram)
+                else:
+                    idx = self.indexer.index_of(trigram)
+                if idx != -1:
+                    features[idx] += 1
+
+        # Bigram features
+        for i in range(len(sentence) - 1):
+            bigram = sentence[i] + ' ' + sentence[i + 1]
+            if add_to_indexer:
+                idx = self.indexer.add_and_get_index(bigram)
+            else:
+                idx = self.indexer.index_of(bigram)
+            if idx != -1:
+                features[idx] += 1
+
+        return features
+
+
 
 
 class SentimentClassifier(object):
@@ -76,8 +166,20 @@ class PerceptronClassifier(SentimentClassifier):
     superclass. Hint: you'll probably need this class to wrap both the weight vector and featurizer -- feel free to
     modify the constructor to pass these in.
     """
-    def __init__(self):
-        raise Exception("Must be implemented")
+    def __init__(self, weights: np.ndarray, feat_extractor: FeatureExtractor):
+        self.weights = weights
+        self.feat_extractor = feat_extractor
+
+
+    def predict(self, sentence: List[str]) -> int:
+        features = self.feat_extractor.extract_features(sentence, add_to_indexer=False)
+        score = 0.0
+        for idx, value in features.items():
+            score += self.weights[idx] * value
+        # Return 1 if score >= 0, else 0
+        return 1 if score >= 0 else 0
+
+
 
 
 class LogisticRegressionClassifier(SentimentClassifier):
@@ -86,28 +188,98 @@ class LogisticRegressionClassifier(SentimentClassifier):
     superclass. Hint: you'll probably need this class to wrap both the weight vector and featurizer -- feel free to
     modify the constructor to pass these in.
     """
-    def __init__(self):
-        raise Exception("Must be implemented")
+    def __init__(self, weights: np.ndarray, feat_extractor: FeatureExtractor):
+        self.weights = weights
+        self.feat_extractor = feat_extractor
+
+    def predict(self, sentence: List[str]) -> int:
+        features = self.feat_extractor.extract_features(sentence, add_to_indexer=False)
+        score = 0.0
+        for idx, value in features.items():
+            score += self.weights[idx] * value
+        probability = 1 / (1 + math.exp(-score))
+        return 1 if probability >= 0.5 else 0
 
 
-def train_perceptron(train_exs: List[SentimentExample], feat_extractor: FeatureExtractor) -> PerceptronClassifier:
+
+def train_perceptron(train_exs: List[SentimentExample], feat_extractor: FeatureExtractor, num_epochs: int = 20) -> PerceptronClassifier:
     """
-    Train a classifier with the perceptron.
+    Train a classifier with the perceptron algorithm.
     :param train_exs: training set, List of SentimentExample objects
     :param feat_extractor: feature extractor to use
+    :param num_epochs: number of epochs to train for
     :return: trained PerceptronClassifier model
     """
-    raise Exception("Must be implemented")
+    indexer = feat_extractor.get_indexer()
+    # First pass: build the feature indexer
+    for ex in train_exs:
+        feat_extractor.extract_features(ex.words, add_to_indexer=True)
+
+    # Initialize weights (numpy array)
+    weights = np.zeros(len(indexer))
+
+    for epoch in range(num_epochs):
+        print(f"Epoch {epoch + 1}/{num_epochs}")
+        # Shuffle the training data at the beginning of each epoch
+        random.shuffle(train_exs)
+        for ex in train_exs:
+            # Extract features without adding to indexer
+            features = feat_extractor.extract_features(ex.words, add_to_indexer=False)
+            # Compute the score
+            score = 0.0
+            for idx, value in features.items():
+                score += weights[idx] * value
+            # Predict label
+            prediction = 1 if score >= 0 else 0
+            # Update weights if prediction is incorrect
+            if prediction != ex.label:
+                # Update rule: weights = weights + learning_rate * (true_label - predicted_label) * features
+                # Since learning_rate is 1 and labels are 0 or 1, the update simplifies
+                for idx, value in features.items():
+                    # For perceptron, the update is +/- feature value
+                    if ex.label == 1:
+                        weights[idx] += value  # Promote features for positive class
+                    else:
+                        weights[idx] -= value  # Demote features for negative class
+
+    return PerceptronClassifier(weights, feat_extractor)
 
 
-def train_logistic_regression(train_exs: List[SentimentExample], feat_extractor: FeatureExtractor) -> LogisticRegressionClassifier:
+def train_logistic_regression(train_exs: List[SentimentExample], feat_extractor: FeatureExtractor, num_epochs: int = 20, learning_rate: float = 0.1) -> LogisticRegressionClassifier:
     """
     Train a logistic regression model.
     :param train_exs: training set, List of SentimentExample objects
     :param feat_extractor: feature extractor to use
     :return: trained LogisticRegressionClassifier model
     """
-    raise Exception("Must be implemented")
+    indexer = feat_extractor.get_indexer()
+    # First pass: build the feature indexer
+    for ex in train_exs:
+        feat_extractor.extract_features(ex.words, add_to_indexer=True)
+
+    # Initialize weights (numpy array)
+    weights = np.zeros(len(indexer))
+
+    for epoch in range(num_epochs):
+        print(f"Epoch {epoch + 1}/{num_epochs}")
+        # Shuffle the training data at the beginning of each epoch
+        random.shuffle(train_exs)
+        for ex in train_exs:
+            # Extract features without adding to indexer
+            features = feat_extractor.extract_features(ex.words, add_to_indexer=False)
+            # Compute the score
+            score = 0.0
+            for idx, value in features.items():
+                score += weights[idx] * value
+            # Compute the prediction probability using sigmoid function
+            probability = 1 / (1 + math.exp(-score))
+            # Compute the error (difference between true label and predicted probability)
+            error = ex.label - probability
+            # Update weights using gradient descent
+            for idx, value in features.items():
+                weights[idx] += learning_rate * error * value
+
+    return LogisticRegressionClassifier(weights, feat_extractor)
 
 
 def train_model(args, train_exs: List[SentimentExample], dev_exs: List[SentimentExample]) -> SentimentClassifier:
@@ -139,9 +311,9 @@ def train_model(args, train_exs: List[SentimentExample], dev_exs: List[Sentiment
     if args.model == "TRIVIAL":
         model = TrivialSentimentClassifier()
     elif args.model == "PERCEPTRON":
-        model = train_perceptron(train_exs, feat_extractor)
+        model = train_perceptron(train_exs, feat_extractor, num_epochs=4)
     elif args.model == "LR":
-        model = train_logistic_regression(train_exs, feat_extractor)
+        model = train_logistic_regression(train_exs, feat_extractor, num_epochs=5)
     else:
         raise Exception("Pass in TRIVIAL, PERCEPTRON, or LR to run the appropriate system")
     return model
